@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Interaktywna analiza wielomianowa spektrogramów impedancyjnych DEIS."
+    />
+    <title>DEIS Polynomial Lab</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#analysisWorkspace">Przejdź do analizy</a>
+
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true">Z*</div>
+        <div>
+          <h1>DEIS Polynomial Lab</h1>
+          <p id="datasetSummary">Ładowanie danych referencyjnych…</p>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <button id="simulatorButton" class="button button-secondary" type="button" title="Otwórz symulator obwodu">
+          <span aria-hidden="true">∿</span>
+          Symulator
+        </button>
+        <label class="button button-secondary file-button" title="Wczytaj komplet czterech plików tekstowych">
+          <span aria-hidden="true">＋</span>
+          Wczytaj dane
+          <input
+            id="datasetFiles"
+            type="file"
+            accept=".txt,.csv"
+            multiple
+            aria-label="Wczytaj pliki re, im, tpi i powloki2"
+          />
+        </label>
+        <button id="exportButton" class="button button-secondary" type="button" disabled>
+          <span aria-hidden="true">↓</span>
+          Eksport CSV
+        </button>
+        <button id="resetButton" class="icon-button" type="button" title="Przywróć ustawienia domyślne" aria-label="Przywróć ustawienia domyślne">
+          ↺
+        </button>
+      </div>
+    </header>
+
+    <main id="analysisWorkspace" class="workspace">
+      <aside class="controls" aria-label="Parametry analizy">
+        <section class="control-section">
+          <div class="section-heading">
+            <h2>Dane</h2>
+            <span id="dataBadge" class="status-badge">Przykład</span>
+          </div>
+
+          <div class="segmented source-segmented" role="radiogroup" aria-label="Źródło danych">
+            <label>
+              <input type="radio" name="dataSource" value="example" checked />
+              <span>Przykładowe</span>
+            </label>
+            <label>
+              <input type="radio" name="dataSource" value="experimental" disabled />
+              <span>Eksperymentalne</span>
+            </label>
+            <label>
+              <input type="radio" name="dataSource" value="simulation" disabled />
+              <span>Symulowane</span>
+            </label>
+          </div>
+
+          <label class="field-label" for="frequencySlider">
+            Częstotliwość
+            <output id="frequencyValue" for="frequencySlider">3 Hz</output>
+          </label>
+          <input id="frequencySlider" type="range" min="0" max="23" value="6" step="1" />
+
+          <label class="field-label" for="componentSelect">Składowa na wykresach 2D</label>
+          <select id="componentSelect">
+            <option value="real">Z′</option>
+            <option value="imag">−Z″</option>
+            <option value="magnitude">|Z|</option>
+          </select>
+
+          <label class="field-label" for="spectrumDensity">
+            Widma w podglądzie
+            <output id="densityValue" for="spectrumDensity">55</output>
+          </label>
+          <input id="spectrumDensity" type="range" min="20" max="140" value="55" step="5" />
+        </section>
+
+        <section class="control-section">
+          <h2>Segmentacja</h2>
+          <div class="segmented" role="radiogroup" aria-label="Strategia segmentacji">
+            <label>
+              <input type="radio" name="strategy" value="overlap" checked />
+              <span>Nakładające okna</span>
+            </label>
+            <label>
+              <input type="radio" name="strategy" value="chebyshev" />
+              <span>Czebyszew</span>
+            </label>
+          </div>
+
+          <div id="overlapControls" class="parameter-grid">
+            <label>
+              <span>Rozmiar okna</span>
+              <input id="windowSize" type="number" min="6" max="300" value="80" step="1" />
+            </label>
+            <label>
+              <span>Krok</span>
+              <input id="stepSize" type="number" min="1" max="200" value="30" step="1" />
+            </label>
+          </div>
+
+          <div id="chebyshevControls" class="parameter-grid is-hidden">
+            <label>
+              <span>Liczba węzłów</span>
+              <input id="nodeCount" type="number" min="4" max="80" value="18" step="1" />
+            </label>
+          </div>
+        </section>
+
+        <section class="control-section">
+          <h2>Dobór stopnia</h2>
+          <div class="segmented" role="radiogroup" aria-label="Kryterium doboru stopnia">
+            <label>
+              <input type="radio" name="criterion" value="r2" checked />
+              <span>Próg R²</span>
+            </label>
+            <label>
+              <input type="radio" name="criterion" value="fixed" />
+              <span>Stały</span>
+            </label>
+          </div>
+
+          <div id="degreeRangeControls" class="parameter-grid">
+            <label>
+              <span>Stopień min.</span>
+              <input id="degreeMin" type="number" min="0" max="50" value="0" step="1" />
+            </label>
+            <label>
+              <span>Stopień maks.</span>
+              <input id="degreeMax" type="number" min="0" max="50" value="5" step="1" />
+            </label>
+          </div>
+
+          <label id="fixedDegreeControl" class="stacked-field is-hidden">
+            <span>Stopień wielomianu</span>
+            <input id="fixedDegree" type="number" min="0" max="50" value="3" step="1" />
+          </label>
+
+          <label id="thresholdControl" class="stacked-field">
+            <span class="field-label">
+              Próg R²
+              <output id="thresholdValue" for="r2Threshold">0,990</output>
+            </span>
+            <input id="r2Threshold" type="range" min="0.9" max="0.999" value="0.99" step="0.001" />
+          </label>
+        </section>
+
+        <section class="control-section analysis-action">
+          <button id="runAnalysis" class="button button-primary" type="button">
+            Przelicz analizę
+          </button>
+          <p id="analysisStatus" class="analysis-status" aria-live="polite">Gotowy do obliczeń</p>
+        </section>
+      </aside>
+
+      <div class="analysis-column">
+        <section class="plot-section spectrogram-section" aria-labelledby="spectrogramTitle">
+          <div class="plot-header">
+            <div>
+              <p class="eyebrow">Widok danych</p>
+              <h2 id="spectrogramTitle">Spektrogram impedancyjny</h2>
+            </div>
+            <div class="plot-options">
+              <label class="check-control">
+                <input id="showIsofrequency" type="checkbox" checked />
+                <span>Linia izoczęstotliwościowa</span>
+              </label>
+              <label class="check-control">
+                <input id="showFit3d" type="checkbox" checked />
+                <span>Dopasowanie</span>
+              </label>
+            </div>
+          </div>
+          <div class="view-controls" aria-label="Ustawienia projekcji trójwymiarowej">
+            <label class="projection-field">
+              <span>Projekcja</span>
+              <select id="projectionType">
+                <option value="perspective">Perspektywiczna</option>
+                <option value="orthographic">Równoległa</option>
+              </select>
+            </label>
+            <label>
+              <span>Azymut <output id="azimuthValue" for="azimuth">−58°</output></span>
+              <input id="azimuth" type="range" min="-180" max="180" value="-58" step="1" />
+            </label>
+            <label>
+              <span>Elewacja <output id="elevationValue" for="elevation">22°</output></span>
+              <input id="elevation" type="range" min="-70" max="70" value="22" step="1" />
+            </label>
+            <label>
+              <span>Powiększenie <output id="zoomValue" for="viewZoom">100%</output></span>
+              <input id="viewZoom" type="range" min="0.65" max="1.6" value="1" step="0.05" />
+            </label>
+            <button id="viewReset" class="icon-button view-reset" type="button" title="Przywróć widok" aria-label="Przywróć widok">↺</button>
+          </div>
+          <div class="canvas-wrap spectrogram-canvas-wrap">
+            <canvas id="spectrogramCanvas" role="img" aria-label="Trójwymiarowy spektrogram impedancyjny"></canvas>
+          </div>
+          <div class="legend-row" aria-label="Legenda spektrogramu">
+            <span><i class="legend-line spectra"></i>Widma EIS</span>
+            <span><i class="legend-line iso"></i>Dane izoczęstotliwościowe</span>
+            <span><i class="legend-line fit"></i>Aproksymacja wielomianowa</span>
+          </div>
+        </section>
+
+        <section class="metrics" aria-label="Metryki jakości">
+          <div>
+            <span>R² średnie</span>
+            <strong id="metricR2">—</strong>
+          </div>
+          <div>
+            <span>RMSE</span>
+            <strong id="metricRmse">—</strong>
+          </div>
+          <div>
+            <span>MAE</span>
+            <strong id="metricMae">—</strong>
+          </div>
+          <div>
+            <span>Błąd maks.</span>
+            <strong id="metricMax">—</strong>
+          </div>
+          <div>
+            <span>Pokrycie</span>
+            <strong id="metricCoverage">—</strong>
+          </div>
+        </section>
+
+        <section class="detail-grid">
+          <article class="plot-section">
+            <div class="plot-header compact">
+              <div>
+                <p class="eyebrow">Wybrana częstotliwość</p>
+                <h2>Przebieg izoczęstotliwościowy 3D</h2>
+              </div>
+              <span id="fitFrequency" class="plot-value">—</span>
+            </div>
+            <div class="canvas-wrap chart-canvas-wrap">
+              <canvas id="fitCanvas" role="img" aria-label="Trójwymiarowy przebieg izoczęstotliwościowy i dopasowanie"></canvas>
+            </div>
+          </article>
+
+          <article class="plot-section">
+            <div class="plot-header compact">
+              <div>
+                <p class="eyebrow">Diagnostyka</p>
+                <h2>Reszty aproksymacji</h2>
+              </div>
+              <span id="residualScale" class="plot-value">—</span>
+            </div>
+            <div class="canvas-wrap chart-canvas-wrap">
+              <canvas id="residualCanvas" role="img" aria-label="Reszty aproksymacji w czasie"></canvas>
+            </div>
+          </article>
+
+          <article class="plot-section degree-section">
+            <div class="plot-header compact">
+              <div>
+                <p class="eyebrow">Dobór modelu</p>
+                <h2>Stopnie w segmentach</h2>
+              </div>
+              <span id="segmentCount" class="plot-value">—</span>
+            </div>
+            <div id="degreeBars" class="degree-bars" aria-label="Rozkład stopni wielomianu"></div>
+          </article>
+
+          <article class="plot-section comparison-section">
+            <div class="plot-header compact">
+              <div>
+                <p class="eyebrow">Sesja</p>
+                <h2>Porównanie uruchomień</h2>
+              </div>
+              <button id="clearHistory" class="text-button" type="button">Wyczyść</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Strategia</th>
+                    <th>Dobór</th>
+                    <th>R²</th>
+                    <th>RMSE</th>
+                  </tr>
+                </thead>
+                <tbody id="historyTable"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="derived-section" aria-labelledby="derivedTitle">
+          <div class="derived-heading">
+            <div>
+              <p class="eyebrow">Nowe charakterystyki częstotliwościowe</p>
+              <h2 id="derivedTitle">Impedancja różniczkowa i względna</h2>
+            </div>
+            <span>pochodne względem czasu</span>
+          </div>
+          <div class="derived-grid">
+            <article class="plot-section">
+              <div class="plot-header compact">
+                <div>
+                  <p class="eyebrow">Z<sub>DIFF</sub> = ∂Z/∂t</p>
+                  <h2>Impedancja różniczkowa</h2>
+                </div>
+                <span class="plot-value">Ω·cm²·h⁻¹</span>
+              </div>
+              <div class="canvas-wrap derived-canvas-wrap">
+                <canvas id="differentialCanvas" role="img" aria-label="Trójwymiarowy spektrogram impedancji różniczkowej"></canvas>
+              </div>
+            </article>
+
+            <article class="plot-section">
+              <div class="plot-header compact">
+                <div>
+                  <p class="eyebrow">Z<sub>REL</sub> = (∂Z/∂t) / Z</p>
+                  <h2>Impedancja względna</h2>
+                </div>
+                <span class="plot-value">h⁻¹</span>
+              </div>
+              <div class="canvas-wrap derived-canvas-wrap">
+                <canvas id="relativeCanvas" role="img" aria-label="Trójwymiarowy spektrogram impedancji względnej"></canvas>
+              </div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <dialog id="simulatorDialog" class="simulator-dialog" aria-labelledby="simulatorTitle">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">Źródło danych</p>
+          <h2 id="simulatorTitle">Symulator spektrogramu DEIS</h2>
+        </div>
+        <button id="simulatorClose" class="icon-button" type="button" title="Zamknij" aria-label="Zamknij symulator">×</button>
+      </div>
+
+      <div class="dialog-body">
+        <section class="simulator-section model-section" aria-labelledby="modelTitle">
+          <div>
+            <h3 id="modelTitle">Model obwodu</h3>
+            <p id="simulatorDescription">Rezystancja szeregowa i równoległe połączenie rezystancji z pojemnością.</p>
+          </div>
+          <label>
+            <span>Obwód</span>
+            <select id="simulatorModel">
+              <option value="rcr">R₁(C₁R₂)</option>
+              <option value="rcrcr">R₁(C₁R₂)(C₂R₃)</option>
+              <option value="rqr">R₁(Q₁R₂)</option>
+              <option value="randles">Randles z dyfuzją Warburga</option>
+            </select>
+          </label>
+          <code id="simulatorEquation">Z(ω,t) = R₁(t) + R₂(t) / [1 + jωR₂(t)C₁(t)]</code>
+        </section>
+
+        <section class="simulator-section" aria-labelledby="parameterTitle">
+          <h3 id="parameterTitle">Zmienność parametrów</h3>
+          <div class="sim-parameter-grid sim-parameter-heading" aria-hidden="true">
+            <span>Parametr</span>
+            <span>Przebieg</span>
+            <span>Wartość początkowa</span>
+            <span>Wartość końcowa</span>
+          </div>
+          <div id="simulatorParameters"></div>
+          <p class="simulator-note">Dla przebiegu sinusoidalnego wartość końcowa jest ekstremum osiąganym w połowie eksperymentu.</p>
+        </section>
+
+        <section class="simulator-section" aria-labelledby="experimentTitle">
+          <h3 id="experimentTitle">Eksperyment</h3>
+          <div class="simulation-grid">
+            <label><span>Czas [h]</span><input id="simDuration" type="number" min="0.1" max="10000" value="20" step="0.5" /></label>
+            <label><span>Liczba widm</span><input id="simSpectra" type="number" min="20" max="2000" value="240" step="10" /></label>
+            <label><span>f min. [Hz]</span><input id="simFrequencyMin" type="number" min="0.000001" max="10000000" value="0.1" step="0.1" /></label>
+            <label><span>f maks. [Hz]</span><input id="simFrequencyMax" type="number" min="0.000001" max="10000000" value="10000" step="100" /></label>
+            <label><span>Liczba częstotliwości</span><input id="simFrequencyCount" type="number" min="8" max="100" value="24" step="1" /></label>
+            <label><span>Szum Gaussa [%]</span><input id="simNoise" type="number" min="0" max="20" value="0.2" step="0.1" /></label>
+            <label><span>Ziarno losowe</span><input id="simSeed" type="number" min="0" max="4294967295" value="2026" step="1" /></label>
+          </div>
+        </section>
+      </div>
+
+      <div class="dialog-actions">
+        <button id="simulatorCancel" class="button button-secondary" type="button">Anuluj</button>
+        <button id="generateSimulation" class="button button-primary" type="button">Generuj i analizuj</button>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="data/akryl-data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

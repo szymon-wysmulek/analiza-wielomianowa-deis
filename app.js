@@ -296,13 +296,37 @@
     return {
       fitReal,
       fitImag,
-      derivativeReal,
-      derivativeImag,
+      derivativeReal: smoothDerivativeSavitzkyGolay(derivativeReal),
+      derivativeImag: smoothDerivativeSavitzkyGolay(derivativeImag),
       degreeByPoint,
       segments,
       metrics,
       coveredPoints: weight,
     };
+  }
+
+  function smoothDerivativeSavitzkyGolay(values) {
+    // Savitzky-Golay: window 21, polyorder 1, mode "interp", as in Python.
+    const windowLength = Math.min(21, Math.floor(values.length / 2) * 2 - 1);
+    if (windowLength < 3) return values.slice();
+
+    const halfWindow = Math.floor(windowLength / 2);
+    const squaredOffsets = windowLength * (windowLength ** 2 - 1) / 12;
+    // Match Python's zero-filled filter input while retaining the existing gaps.
+    const source = values.map((value) => value === null ? 0 : value);
+
+    return values.map((value, index) => {
+      if (value === null) return null;
+      const start = Math.max(0, Math.min(index - halfWindow, values.length - windowLength));
+      let sum = 0;
+      let moment = 0;
+      for (let offset = 0; offset < windowLength; offset += 1) {
+        sum += source[start + offset];
+        moment += (offset - halfWindow) * source[start + offset];
+      }
+      // Interior samples use the centered mean; edge samples use a linear fit.
+      return sum / windowLength + (moment / squaredOffsets) * (index - start - halfWindow);
+    });
   }
 
   function overlappingRanges(length, windowSize, stepSize) {

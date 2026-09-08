@@ -71,6 +71,15 @@
             </label>
           </div>
 
+          <label class="stacked-field" for="exampleDataset">
+            <span>Zestaw przykładowy</span>
+            <select id="exampleDataset">
+              <option value="acrylic">Powłoka akrylowa</option>
+              <option value="pitting">Korozja wżerowa</option>
+              <option value="inhibitor">Inhibitor korozji</option>
+            </select>
+          </label>
+
           <label class="field-label" for="frequencySlider">
             Częstotliwość
             <output id="frequencyValue" for="frequencySlider">3 Hz</output>
@@ -405,6 +414,8 @@
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <script src="data/akryl-data.js"></script>
+    <script src="data/pitting-data.js"></script>
+    <script src="data/inhibitor-data.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -31,6 +31,12 @@
     zoom: 1,
   };
 
+  const EXAMPLE_DEFAULT_FREQUENCIES = {
+    acrylic: 29,
+    pitting: 293,
+    inhibitor: 3,
+  };
+
   const state = {
     dataset: null,
     result: null,
@@ -43,6 +49,7 @@
       experimental: null,
       simulation: null,
     },
+    examples: {},
     history: [],
     toastTimer: null,
     view: {
@@ -60,6 +67,7 @@
     datasetSummary: $("#datasetSummary"),
     dataBadge: $("#dataBadge"),
     files: $("#datasetFiles"),
+    exampleDataset: $("#exampleDataset"),
     simulatorButton: $("#simulatorButton"),
     simulatorDialog: $("#simulatorDialog"),
     simulatorClose: $("#simulatorClose"),
@@ -1393,6 +1401,7 @@
       input.disabled = !state.datasets[input.value];
       input.checked = input.value === state.source;
     });
+    els.exampleDataset.disabled = state.source !== "example";
   }
 
   function activateDataset(source, targetFrequency = null) {
@@ -1651,6 +1660,8 @@
     if (els.simulatorDialog.open) els.simulatorDialog.close();
     applyDefaults();
     updateConditionalControls();
+    els.exampleDataset.value = "acrylic";
+    state.datasets.example = state.examples.acrylic;
     activateDataset("example");
     showToast("Przywrócono dane i ustawienia referencyjne.");
   }
@@ -1816,6 +1827,13 @@
         if (input.checked) activateDataset(input.value);
       });
     });
+    els.exampleDataset.addEventListener("change", () => {
+      const exampleKey = els.exampleDataset.value;
+      const dataset = state.examples[exampleKey];
+      if (!dataset) return;
+      state.datasets.example = dataset;
+      activateDataset("example", EXAMPLE_DEFAULT_FREQUENCIES[exampleKey]);
+    });
     els.files.addEventListener("change", async (event) => {
       try {
         await importDataset(event.target.files);
@@ -1880,7 +1898,12 @@
 
   function initialize() {
     try {
-      state.datasets.example = normalizeDataset(window.AKRYL_DATA);
+      state.examples = {
+        acrylic: normalizeDataset(window.AKRYL_DATA),
+        pitting: normalizeDataset(window.PITTING_DATA),
+        inhibitor: normalizeDataset(window.INHIBITOR_DATA),
+      };
+      state.datasets.example = state.examples.acrylic;
       state.dataset = state.datasets.example;
       applyDefaults();
       renderSimulatorParameters();

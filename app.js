@@ -634,23 +634,27 @@
   function autoTuneDataset(dataset, baseSettings = DEFAULTS) {
     const x = datasetAxis(dataset, "analysis").values;
     const threshold = clamp(Number(baseSettings.threshold), 0.9, 0.999);
+    const degreeMin = clamp(Math.round(Number(baseSettings.degreeMin)), 0, 50);
+    const degreeMax = clamp(Math.round(Number(baseSettings.degreeMax)), degreeMin, 50);
+    if (x.length < degreeMin + 1) {
+      throw new Error(`Za mało punktów, aby zastosować wybrany stopień minimalny ${degreeMin}.`);
+    }
     const windowSizes = autoWindowSizes(x.length, baseSettings.windowSize);
     const overlapFractions = [0.4, 0.6, 0.75];
     const candidates = [];
 
     windowSizes.forEach((windowSize) => {
+      if (windowSize < degreeMin + 1) return;
       overlapFractions.forEach((targetOverlap) => {
         const stepSize = clamp(Math.round(windowSize * (1 - targetOverlap)), 1, Math.max(1, windowSize - 1));
-        const degreeLimit = Math.min(50, Math.max(1, windowSize - 1));
         const settings = {
           ...baseSettings,
           strategy: "overlap",
           criterion: "r2",
           windowSize,
           stepSize,
-          degreeMin: 1,
-          degreeMax: degreeLimit,
-          fixedDegree: 3,
+          degreeMin,
+          degreeMax,
           threshold,
         };
         candidates.push({
@@ -1664,8 +1668,6 @@
         $$('input[name="criterion"]').forEach((input) => { input.checked = input.value === "r2"; });
         els.windowSize.value = String(tuned.settings.windowSize);
         els.stepSize.value = String(tuned.settings.stepSize);
-        els.degreeMin.value = String(tuned.settings.degreeMin);
-        els.degreeMax.value = String(tuned.settings.degreeMax);
         updateConditionalControls();
 
         const overlapPercent = Math.round(100 * tuned.overlap);
@@ -1674,7 +1676,8 @@
         const degreeRange = Number.isFinite(tuned.minimumDegree)
           ? `${tuned.minimumDegree}–${tuned.maximumDegree}`
           : "—";
-        els.autoTuneSummary.textContent = `AUTO: okno ${tuned.settings.windowSize}, krok ${tuned.settings.stepSize} (${overlapPercent}% nakładania), stopnie wg R² ${degreeRange} (średnio ${meanDegree}) · pokrycie ${coveragePercent}%.`;
+        const thresholdText = formatNumber(tuned.settings.threshold, 3);
+        els.autoTuneSummary.textContent = `AUTO: R² ≥ ${thresholdText}, zadany zakres ${tuned.settings.degreeMin}–${tuned.settings.degreeMax}, użyte stopnie ${degreeRange} (średnio ${meanDegree}) · okno ${tuned.settings.windowSize}, krok ${tuned.settings.stepSize} (${overlapPercent}% nakładania) · pokrycie ${coveragePercent}%.`;
         runAnalysis();
         showToast(`AUTO sprawdziło ${tuned.candidatesEvaluated} wariantów dla ${tuned.frequenciesEvaluated} częstotliwości.`);
       } catch (error) {
@@ -1688,7 +1691,7 @@
   }
 
   function resetAutoTuneSummary() {
-    els.autoTuneSummary.textContent = "Dobiera okno, nakładanie i najniższy stopień spełniający próg R².";
+    els.autoTuneSummary.textContent = "Używa wybranego zakresu stopni i progu R²; dobiera okno oraz nakładanie.";
   }
 
   function readSimulationSettings() {

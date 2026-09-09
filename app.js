@@ -121,6 +121,11 @@
     residualCanvas: $("#residualCanvas"),
     differentialCanvas: $("#differentialCanvas"),
     relativeCanvas: $("#relativeCanvas"),
+    derivedAxisDescription: $("#derivedAxisDescription"),
+    differentialFormula: $("#differentialFormula"),
+    differentialUnit: $("#differentialUnit"),
+    relativeFormula: $("#relativeFormula"),
+    relativeUnit: $("#relativeUnit"),
     fitFrequency: $("#fitFrequency"),
     residualScale: $("#residualScale"),
     segmentCount: $("#segmentCount"),
@@ -146,6 +151,7 @@
       imag: raw.imag.map((row) => row.map(Number)),
       potential: raw.potential ? raw.potential.map(Number) : [],
       current: raw.current ? raw.current.map(Number) : [],
+      analysisAxis: raw.analysisAxis === "potential" ? "potential" : "time",
       simulation: raw.simulation || null,
     };
 
@@ -155,6 +161,9 @@
     if (dataset.imag.length !== rows || dataset.timeSeconds.length !== rows) {
       throw new Error("Niezgodna liczba chwil w plikach re, im i tpi.");
     }
+    if (dataset.analysisAxis === "potential" && dataset.potential.length !== rows) {
+      throw new Error("Niezgodna liczba wartości potencjału w pliku tpi.");
+    }
     if (
       dataset.real.some((row) => row.length !== columns) ||
       dataset.imag.some((row) => row.length !== columns)
@@ -162,6 +171,35 @@
       throw new Error("Liczba częstotliwości nie odpowiada kolumnom macierzy re i im.");
     }
     return dataset;
+  }
+
+  function datasetAxis(dataset) {
+    if (dataset.analysisAxis === "potential") {
+      const values = dataset.potential;
+      return {
+        kind: "potential",
+        values,
+        symbol: "E",
+        unit: "V",
+        name: "potencjału",
+        csvHeader: "potential_v",
+        decimals: 3,
+        start: Math.min(...values),
+        end: Math.max(...values),
+      };
+    }
+    const values = dataset.timeSeconds.map((value) => value / 3600);
+    return {
+      kind: "time",
+      values,
+      symbol: "t",
+      unit: "h",
+      name: "czasu",
+      csvHeader: "time_h",
+      decimals: 1,
+      start: Math.min(...values),
+      end: Math.max(...values),
+    };
   }
 
   function currentSettings() {
@@ -178,8 +216,8 @@
       density: clamp(Math.round(Number(els.density.value)), 20, 140),
       strategy: $("input[name='strategy']:checked").value,
       criterion: $("input[name='criterion']:checked").value,
-      windowSize: clamp(Math.round(Number(els.windowSize.value)), 6, state.dataset.timeSeconds.length),
-      stepSize: clamp(Math.round(Number(els.stepSize.value)), 1, state.dataset.timeSeconds.length),
+      windowSize: clamp(Math.round(Number(els.windowSize.value)), 6, state.dataset.real.length),
+      stepSize: clamp(Math.round(Number(els.stepSize.value)), 1, state.dataset.real.length),
       nodeCount: clamp(Math.round(Number(els.nodeCount.value)), 4, 80),
       degreeMin,
       degreeMax,
@@ -205,7 +243,8 @@
   function runAnalysis({ addHistory = true } = {}) {
     if (!state.dataset) return;
     const settings = currentSettings();
-    const timeHours = state.dataset.timeSeconds.map((value) => value / 3600);
+    const axis = datasetAxis(state.dataset);
+    const xValues = axis.values;
     const real = state.dataset.real.map((row) => row[settings.frequencyIndex]);
     const imag = state.dataset.imag.map((row) => row[settings.frequencyIndex]);
 
@@ -214,15 +253,16 @@
     const started = performance.now();
 
     try {
-      state.result = analyzeComplexSeries(timeHours, real, imag, settings);
+      state.result = analyzeComplexSeries(xValues, real, imag, settings);
       state.result.settings = settings;
-      state.result.timeHours = timeHours;
+      state.result.xValues = xValues;
+      state.result.axis = axis;
       state.result.real = real;
       state.result.imag = imag;
       const derivedKey = derivedSettingsKey(settings);
       if (state.derivedDataset !== state.dataset || state.derivedKey !== derivedKey) {
         state.derived = analyzeImpedanceSpectrogram(
-          timeHours,
+          xValues,
           state.dataset.real,
           state.dataset.imag,
           settings,
@@ -818,6 +858,7 @@
 
     const data = state.dataset;
     const settings = currentSettings();
+    const axis = datasetAxis(data);
     const bounds = impedanceBounds(data);
     const projector = createProjector(width, height, { x: 1.35, y: 1, z: 1.75 });
 
@@ -825,12 +866,11 @@
       return projector({
         x: normalize(real, bounds.minReal, bounds.maxReal),
         y: normalize(imag, bounds.minImag, bounds.maxImag),
-        z: timeIndex / Math.max(1, data.timeSeconds.length - 1),
+        z: normalize(axis.values[timeIndex], axis.start, axis.end),
       });
     };
 
-    const maxHour = data.timeSeconds[data.timeSeconds.length - 1] / 3600;
-    draw3dAxes(ctx, projector, { x: "Z′", y: "−Z″", z: "t" }, "z", maxHour);
+    draw3dAxes(ctx, projector, { x: "Z′", y: "−Z″", z: axis.symbol }, "z", axis);
     const rowIndices = evenlySpacedIndices(data.real.length, settings.density)
       .map((rowIndex) => ({
         rowIndex,
@@ -879,18 +919,19 @@
 
   function renderDerivedSpectrograms() {
     if (!state.derived) return;
+    const axis = datasetAxis(state.dataset);
     renderDerivedSpectrogram(
       els.differentialCanvas,
       state.derived.differentialReal,
       state.derived.differentialImag,
-      { x: "Z′diff", y: "−Z″diff", z: "t" },
+      { x: "Z′diff", y: "−Z″diff", z: axis.symbol },
       COLORS.burgundy,
     );
     renderDerivedSpectrogram(
       els.relativeCanvas,
       state.derived.relativeReal,
       state.derived.relativeImag,
-      { x: "Re(Zrel)", y: "−Im(Zrel)", z: "t" },
+      { x: "Re(Zrel)", y: "−Im(Zrel)", z: axis.symbol },
       COLORS.teal,
     );
   }
@@ -911,18 +952,18 @@
 
     const settings = currentSettings();
     const rowCount = realMatrix.length;
+    const axis = datasetAxis(state.dataset);
     const projector = createProjector(width, height, { x: 1.35, y: 1, z: 1.75 });
     const project = (real, imag, rowIndex) => {
       if (real === null || imag === null || !Number.isFinite(real) || !Number.isFinite(imag)) return null;
       return projector({
         x: normalize(real, bounds.minReal, bounds.maxReal),
         y: normalize(imag, bounds.minImag, bounds.maxImag),
-        z: rowIndex / Math.max(1, rowCount - 1),
+        z: normalize(axis.values[rowIndex], axis.start, axis.end),
       });
     };
 
-    const maxHour = state.dataset.timeSeconds[state.dataset.timeSeconds.length - 1] / 3600;
-    draw3dAxes(ctx, projector, labels, "z", maxHour);
+    draw3dAxes(ctx, projector, labels, "z", axis);
     const rowIndices = evenlySpacedIndices(rowCount, settings.density)
       .map((rowIndex) => ({
         rowIndex,
@@ -1018,7 +1059,7 @@
     };
   }
 
-  function draw3dAxes(ctx, projector, labels, timeAxis, maxHour) {
+  function draw3dAxes(ctx, projector, labels, valueAxis, axis) {
     const origin = projector({ x: 0, y: 0, z: 0 });
     const endpoints = {
       x: projector({ x: 1.08, y: 0, z: 0 }),
@@ -1040,11 +1081,11 @@
       ctx.fillText(labels[axis], endpoint.x + (endpoint.x >= origin.x ? 7 : -7), endpoint.y - 5);
     });
 
-    const timeEnd = endpoints[timeAxis];
+    const valueEnd = endpoints[valueAxis];
     ctx.font = "10px Arial";
     ctx.textAlign = "center";
-    ctx.fillText("0 h", origin.x, origin.y + 16);
-    ctx.fillText(`${formatNumber(maxHour, 1)} h`, timeEnd.x, timeEnd.y + 16);
+    ctx.fillText(`${formatNumber(axis.start, axis.decimals)} ${axis.unit}`, origin.x, origin.y + 16);
+    ctx.fillText(`${formatNumber(axis.end, axis.decimals)} ${axis.unit}`, valueEnd.x, valueEnd.y + 16);
   }
 
   function drawArrowhead(ctx, origin, endpoint) {
@@ -1067,24 +1108,25 @@
 
     const result = state.result;
     const bounds = series3dBounds(result.real, result.imag, result.fitReal, result.fitImag);
-    const timeMin = result.timeHours[0];
-    const timeMax = result.timeHours[result.timeHours.length - 1];
+    const xValues = result.xValues;
+    const xMin = result.axis.start;
+    const xMax = result.axis.end;
     const projector = createProjector(width, height, { x: 1.65, y: 1.05, z: 1.05 });
-    const project = (time, real, imag) => projector({
-      x: normalize(time, timeMin, timeMax),
+    const project = (x, real, imag) => projector({
+      x: normalize(x, xMin, xMax),
       y: normalize(real, bounds.minReal, bounds.maxReal),
       z: normalize(imag, bounds.minImag, bounds.maxImag),
     });
 
-    draw3dAxes(ctx, projector, { x: "t", y: "Z′", z: "−Z″" }, "x", timeMax);
-    const dataStep = Math.max(1, Math.floor(result.timeHours.length / 450));
+    draw3dAxes(ctx, projector, { x: result.axis.symbol, y: "Z′", z: "−Z″" }, "x", result.axis);
+    const dataStep = Math.max(1, Math.floor(xValues.length / 450));
     const dataPoints = [];
     const fitPoints = [];
-    for (let index = 0; index < result.timeHours.length; index += dataStep) {
-      dataPoints.push(project(result.timeHours[index], result.real[index], result.imag[index]));
+    for (let index = 0; index < xValues.length; index += dataStep) {
+      dataPoints.push(project(xValues[index], result.real[index], result.imag[index]));
       fitPoints.push(result.fitReal[index] === null
         ? null
-        : project(result.timeHours[index], result.fitReal[index], result.fitImag[index]));
+        : project(xValues[index], result.fitReal[index], result.fitImag[index]));
     }
 
     ctx.strokeStyle = COLORS.ink;
@@ -1143,9 +1185,9 @@
     const observed = componentValues(state.result.real, state.result.imag, component);
     const fitted = componentValues(state.result.fitReal, state.result.fitImag, component);
     const residuals = observed.map((value, index) => fitted[index] === null ? null : value - fitted[index]);
-    drawLineChart(els.residualCanvas, state.result.timeHours, [
+    drawLineChart(els.residualCanvas, state.result.xValues, [
       { values: residuals, color: COLORS.blue, width: 1, points: false, alpha: 0.85 },
-    ], { component, zeroLine: true, residual: true });
+    ], { component, zeroLine: true, residual: true, axis: state.result.axis });
   }
 
   function drawLineChart(canvas, x, series, options) {
@@ -1172,8 +1214,8 @@
     }
 
     const unit = chooseUnit(Math.max(Math.abs(min), Math.abs(max)));
-    const xMin = x[0];
-    const xMax = x[x.length - 1];
+    const xMin = options.axis.start;
+    const xMax = options.axis.end;
     const mapX = (value) => margin.left + normalize(value, xMin, xMax) * plotWidth;
     const mapY = (value) => margin.top + (1 - normalize(value, min, max)) * plotHeight;
 
@@ -1195,7 +1237,7 @@
       const xValue = xMin + ((xMax - xMin) * tick) / 4;
       const xPixel = mapX(xValue);
       ctx.textAlign = "center";
-      ctx.fillText(formatNumber(xValue, 1), xPixel, height - 15);
+      ctx.fillText(formatNumber(xValue, options.axis.decimals), xPixel, height - 15);
     }
 
     if (options.zeroLine) {
@@ -1231,7 +1273,7 @@
     ctx.fillStyle = COLORS.muted;
     ctx.font = "10px Arial";
     ctx.textAlign = "center";
-    ctx.fillText("t [h]", margin.left + plotWidth / 2, height - 3);
+    ctx.fillText(`${options.axis.symbol} [${options.axis.unit}]`, margin.left + plotWidth / 2, height - 3);
     ctx.save();
     ctx.translate(11, margin.top + plotHeight / 2);
     ctx.rotate(-Math.PI / 2);
@@ -1385,13 +1427,18 @@
 
   function updateDatasetInterface() {
     const data = state.dataset;
-    const duration = (data.timeSeconds[data.timeSeconds.length - 1] - data.timeSeconds[0]) / 3600;
-    els.datasetSummary.textContent = `${data.name} · ${data.real.length} chwil · ${data.frequenciesHz.length} częstotliwości · ${formatNumber(duration, 1)} h`;
+    const axis = datasetAxis(data);
+    const axisSummary = axis.kind === "time"
+      ? `${formatNumber(axis.end - axis.start, 1)} h`
+      : `${axis.symbol}: ${formatNumber(axis.start, axis.decimals)}–${formatNumber(axis.end, axis.decimals)} ${axis.unit}`;
+    const sampleLabel = axis.kind === "time" ? "chwil" : "punktów";
+    els.datasetSummary.textContent = `${data.name} · ${data.real.length} ${sampleLabel} · ${data.frequenciesHz.length} częstotliwości · ${axisSummary}`;
     els.dataBadge.textContent = state.source === "example"
       ? "Przykład"
       : state.source === "simulation" ? "Symulacja" : "Lokalne";
     els.frequency.max = String(data.frequenciesHz.length - 1);
     els.frequency.value = String(Math.min(Number(els.frequency.value), data.frequenciesHz.length - 1));
+    updateAxisInterface(axis);
     updateDataSourceControls();
     updateFrequencyLabels();
   }
@@ -1402,6 +1449,16 @@
       input.checked = input.value === state.source;
     });
     els.exampleDataset.disabled = state.source !== "example";
+  }
+
+  function updateAxisInterface(axis) {
+    const potential = axis.kind === "potential";
+    els.derivedAxisDescription.textContent = `pochodne względem ${axis.name}`;
+    els.differentialFormula.innerHTML = `Z<sub>DIFF</sub> = ∂Z/∂${axis.symbol}`;
+    els.relativeFormula.innerHTML = `Z<sub>REL</sub> = (∂Z/∂${axis.symbol}) / Z`;
+    els.differentialUnit.textContent = potential ? "Ω·cm²·V⁻¹" : "Ω·cm²·h⁻¹";
+    els.relativeUnit.textContent = potential ? "V⁻¹" : "h⁻¹";
+    els.residualCanvas.setAttribute("aria-label", `Reszty aproksymacji względem ${axis.name}`);
   }
 
   function activateDataset(source, targetFrequency = null) {
@@ -1623,10 +1680,11 @@
   function exportCsv() {
     if (!state.result) return;
     const frequency = state.dataset.frequenciesHz[state.result.settings.frequencyIndex];
+    const axis = state.result.axis;
     const lines = [
-      "time_h,frequency_hz,re_z,im_z,re_fit,im_fit,absolute_residual,mean_degree",
+      `${axis.csvHeader},frequency_hz,re_z,im_z,re_fit,im_fit,absolute_residual,mean_degree`,
     ];
-    for (let index = 0; index < state.result.timeHours.length; index += 1) {
+    for (let index = 0; index < state.result.xValues.length; index += 1) {
       const fitReal = state.result.fitReal[index];
       const fitImag = state.result.fitImag[index];
       const residual = fitReal === null ? "" : Math.hypot(
@@ -1634,7 +1692,7 @@
         state.result.imag[index] - fitImag,
       );
       lines.push([
-        state.result.timeHours[index],
+        state.result.xValues[index],
         frequency,
         state.result.real[index],
         state.result.imag[index],

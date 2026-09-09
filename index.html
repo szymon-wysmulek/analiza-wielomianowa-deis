@@ -319,16 +319,16 @@
               <p class="eyebrow">Nowe charakterystyki częstotliwościowe</p>
               <h2 id="derivedTitle">Impedancja różniczkowa i względna</h2>
             </div>
-            <span>pochodne względem czasu</span>
+            <span id="derivedAxisDescription">pochodne względem czasu</span>
           </div>
           <div class="derived-grid">
             <article class="plot-section">
               <div class="plot-header compact">
                 <div>
-                  <p class="eyebrow">Z<sub>DIFF</sub> = ∂Z/∂t</p>
+                  <p id="differentialFormula" class="eyebrow">Z<sub>DIFF</sub> = ∂Z/∂t</p>
                   <h2>Impedancja różniczkowa</h2>
                 </div>
-                <span class="plot-value">Ω·cm²·h⁻¹</span>
+                <span id="differentialUnit" class="plot-value">Ω·cm²·h⁻¹</span>
               </div>
               <div class="canvas-wrap derived-canvas-wrap">
                 <canvas id="differentialCanvas" role="img" aria-label="Trójwymiarowy spektrogram impedancji różniczkowej"></canvas>
@@ -338,10 +338,10 @@
             <article class="plot-section">
               <div class="plot-header compact">
                 <div>
-                  <p class="eyebrow">Z<sub>REL</sub> = (∂Z/∂t) / Z</p>
+                  <p id="relativeFormula" class="eyebrow">Z<sub>REL</sub> = (∂Z/∂t) / Z</p>
                   <h2>Impedancja względna</h2>
                 </div>
-                <span class="plot-value">h⁻¹</span>
+                <span id="relativeUnit" class="plot-value">h⁻¹</span>
               </div>
               <div class="canvas-wrap derived-canvas-wrap">
                 <canvas id="relativeCanvas" role="img" aria-label="Trójwymiarowy spektrogram impedancji względnej"></canvas>
@@ -413,9 +413,9 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="data/akryl-data.js"></script>
-    <script src="data/pitting-data.js"></script>
-    <script src="data/inhibitor-data.js"></script>
-    <script src="app.js"></script>
+    <script src="data/akryl-data.js?v=20260908-2"></script>
+    <script src="data/pitting-data.js?v=20260908-2"></script>
+    <script src="data/inhibitor-data.js?v=20260908-2"></script>
+    <script src="app.js?v=20260908-2"></script>
   </body>
 </html>

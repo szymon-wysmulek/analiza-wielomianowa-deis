@@ -641,6 +641,7 @@
     windowSizes.forEach((windowSize) => {
       overlapFractions.forEach((targetOverlap) => {
         const stepSize = clamp(Math.round(windowSize * (1 - targetOverlap)), 1, Math.max(1, windowSize - 1));
+        const degreeLimit = Math.min(50, Math.max(1, windowSize - 1));
         const settings = {
           ...baseSettings,
           strategy: "overlap",
@@ -648,7 +649,7 @@
           windowSize,
           stepSize,
           degreeMin: 1,
-          degreeMax: 5,
+          degreeMax: degreeLimit,
           fixedDegree: 3,
           threshold,
         };
@@ -704,6 +705,8 @@
     let errorCount = 0;
     let degreeSum = 0;
     let segmentCount = 0;
+    let minimumDegree = Infinity;
+    let maximumDegree = -Infinity;
     let r2Sum = 0;
     let r2Count = 0;
 
@@ -723,6 +726,8 @@
       analysis.segments.forEach((segment) => {
         degreeSum += segment.degree;
         segmentCount += 1;
+        minimumDegree = Math.min(minimumDegree, segment.degree);
+        maximumDegree = Math.max(maximumDegree, segment.degree);
       });
     }
 
@@ -730,6 +735,8 @@
       coverage: coveredPoints / (rowCount * frequencyCount),
       normalizedRmse: errorCount ? normalizedError / errorCount : Infinity,
       meanDegree: segmentCount ? degreeSum / segmentCount : Infinity,
+      minimumDegree: segmentCount ? minimumDegree : NaN,
+      maximumDegree: segmentCount ? maximumDegree : NaN,
       meanR2: r2Count ? r2Sum / r2Count : NaN,
       segmentCount,
     };
@@ -1664,7 +1671,10 @@
         const overlapPercent = Math.round(100 * tuned.overlap);
         const coveragePercent = formatNumber(100 * tuned.coverage, 1);
         const meanDegree = Number.isFinite(tuned.meanDegree) ? formatNumber(tuned.meanDegree, 2) : "—";
-        els.autoTuneSummary.textContent = `AUTO: okno ${tuned.settings.windowSize}, krok ${tuned.settings.stepSize} (${overlapPercent}% nakładania), stopnie 1–5 (średnio ${meanDegree}) · pokrycie ${coveragePercent}%.`;
+        const degreeRange = Number.isFinite(tuned.minimumDegree)
+          ? `${tuned.minimumDegree}–${tuned.maximumDegree}`
+          : "—";
+        els.autoTuneSummary.textContent = `AUTO: okno ${tuned.settings.windowSize}, krok ${tuned.settings.stepSize} (${overlapPercent}% nakładania), stopnie wg R² ${degreeRange} (średnio ${meanDegree}) · pokrycie ${coveragePercent}%.`;
         runAnalysis();
         showToast(`AUTO sprawdziło ${tuned.candidatesEvaluated} wariantów dla ${tuned.frequenciesEvaluated} częstotliwości.`);
       } catch (error) {
@@ -1678,7 +1688,7 @@
   }
 
   function resetAutoTuneSummary() {
-    els.autoTuneSummary.textContent = "Dobiera okno, nakładanie i stopnie 1–5 dla całego spektrogramu.";
+    els.autoTuneSummary.textContent = "Dobiera okno, nakładanie i najniższy stopień spełniający próg R².";
   }
 
   function readSimulationSettings() {

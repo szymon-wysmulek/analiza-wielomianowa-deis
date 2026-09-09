@@ -7,3 +7,4 @@ Interaktywna analiza wielomianowa spektrogramów DEIS oraz symulacja układów e
 
 Aplikacja działa bezpośrednio w przeglądarce, bez instalacji.
 Zawiera trzy przykładowe zestawy eksperymentalne — powłokę akrylową, korozję wżerową i inhibitor korozji — oraz symulator obwodów zastępczych.
+Tryb AUTO dobiera okno, nakładanie i stopnie wielomianu 1–5 na podstawie całego spektrogramu.

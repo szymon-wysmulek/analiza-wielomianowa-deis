@@ -176,18 +176,6 @@ select:focus-visible,
   opacity: 0.48;
 }
 
-.file-button {
-  cursor: pointer;
-}
-
-.file-button input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  opacity: 0;
-}
-
 .icon-button {
   display: grid;
   place-items: center;
@@ -310,15 +298,13 @@ input[type="range"] {
 }
 
 .source-segmented {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-bottom: 2px;
 }
 
 .source-segmented span {
   min-height: 38px;
-  padding-right: 3px;
-  padding-left: 3px;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .segmented label {
@@ -380,6 +366,19 @@ input[type="range"] {
   position: sticky;
   bottom: 0;
   background: #fff;
+}
+
+.auto-tune-control {
+  margin-top: 14px;
+}
+
+.auto-tune-control .button {
+  width: 100%;
+}
+
+.auto-tune-control .analysis-status {
+  margin-top: 7px;
+  line-height: 1.35;
 }
 
 .analysis-status {

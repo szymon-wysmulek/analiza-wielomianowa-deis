@@ -29,6 +29,7 @@
     azimuth: -58,
     elevation: 22,
     zoom: 1,
+    simulationNoise: 0,
   };
 
   const EXAMPLE_DEFAULT_FREQUENCIES = {
@@ -46,7 +47,6 @@
     source: "example",
     datasets: {
       example: null,
-      experimental: null,
       simulation: null,
     },
     examples: {},
@@ -66,7 +66,6 @@
   const els = {
     datasetSummary: $("#datasetSummary"),
     dataBadge: $("#dataBadge"),
-    files: $("#datasetFiles"),
     exampleDataset: $("#exampleDataset"),
     simulatorButton: $("#simulatorButton"),
     simulatorDialog: $("#simulatorDialog"),
@@ -83,7 +82,6 @@
     simFrequencyMax: $("#simFrequencyMax"),
     simFrequencyCount: $("#simFrequencyCount"),
     simNoise: $("#simNoise"),
-    simSeed: $("#simSeed"),
     exportButton: $("#exportButton"),
     resetButton: $("#resetButton"),
     frequency: $("#frequencySlider"),
@@ -104,6 +102,8 @@
     fixedDegree: $("#fixedDegree"),
     threshold: $("#r2Threshold"),
     thresholdValue: $("#thresholdValue"),
+    autoTune: $("#autoTune"),
+    autoTuneSummary: $("#autoTuneSummary"),
     run: $("#runAnalysis"),
     status: $("#analysisStatus"),
     showIso: $("#showIsofrequency"),
@@ -631,6 +631,120 @@
     };
   }
 
+  function autoTuneDataset(dataset, baseSettings = DEFAULTS) {
+    const x = datasetAxis(dataset, "analysis").values;
+    const threshold = clamp(Number(baseSettings.threshold), 0.9, 0.999);
+    const windowSizes = autoWindowSizes(x.length, baseSettings.windowSize);
+    const overlapFractions = [0.4, 0.6, 0.75];
+    const candidates = [];
+
+    windowSizes.forEach((windowSize) => {
+      overlapFractions.forEach((targetOverlap) => {
+        const stepSize = clamp(Math.round(windowSize * (1 - targetOverlap)), 1, Math.max(1, windowSize - 1));
+        const settings = {
+          ...baseSettings,
+          strategy: "overlap",
+          criterion: "r2",
+          windowSize,
+          stepSize,
+          degreeMin: 1,
+          degreeMax: 5,
+          fixedDegree: 3,
+          threshold,
+        };
+        candidates.push({
+          settings,
+          overlap: 1 - stepSize / windowSize,
+          ...evaluateAutoCandidate(x, dataset.real, dataset.imag, settings),
+        });
+      });
+    });
+
+    if (!candidates.length) throw new Error("Brak ustawień możliwych do sprawdzenia w trybie AUTO.");
+    const maximumCoverage = Math.max(...candidates.map((candidate) => candidate.coverage));
+    let shortlist = candidates.filter((candidate) => candidate.coverage >= maximumCoverage - 0.002);
+    const minimumError = Math.min(...shortlist.map((candidate) => candidate.normalizedRmse));
+    if (Number.isFinite(minimumError)) {
+      const errorTolerance = Math.max(1e-8, minimumError * 0.08);
+      shortlist = shortlist.filter((candidate) => candidate.normalizedRmse <= minimumError + errorTolerance);
+    }
+    shortlist.sort((left, right) => (
+      left.meanDegree - right.meanDegree
+      || left.overlap - right.overlap
+      || right.settings.windowSize - left.settings.windowSize
+      || left.normalizedRmse - right.normalizedRmse
+    ));
+
+    return {
+      ...shortlist[0],
+      candidatesEvaluated: candidates.length,
+      frequenciesEvaluated: dataset.frequenciesHz.length,
+    };
+  }
+
+  function autoWindowSizes(length, requestedWindow) {
+    const minimum = Math.min(length, 12);
+    const maximum = Math.max(minimum, Math.min(length, 180));
+    return [
+      Math.round(length * 0.06),
+      Math.round(length * 0.1),
+      Math.round(length * 0.16),
+      Number(requestedWindow) || DEFAULTS.windowSize,
+    ]
+      .map((value) => clamp(Math.round(value), minimum, maximum))
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .sort((left, right) => left - right);
+  }
+
+  function evaluateAutoCandidate(x, realMatrix, imagMatrix, settings) {
+    const rowCount = x.length;
+    const frequencyCount = realMatrix[0].length;
+    let coveredPoints = 0;
+    let normalizedError = 0;
+    let errorCount = 0;
+    let degreeSum = 0;
+    let segmentCount = 0;
+    let r2Sum = 0;
+    let r2Count = 0;
+
+    for (let frequencyIndex = 0; frequencyIndex < frequencyCount; frequencyIndex += 1) {
+      const real = realMatrix.map((row) => row[frequencyIndex]);
+      const imag = imagMatrix.map((row) => row[frequencyIndex]);
+      const analysis = analyzeComplexSeries(x, real, imag, settings);
+      coveredPoints += analysis.metrics.coverage * rowCount;
+      if (Number.isFinite(analysis.metrics.rmse)) {
+        normalizedError += analysis.metrics.rmse / complexSeriesScale(real, imag);
+        errorCount += 1;
+      }
+      if (Number.isFinite(analysis.metrics.r2)) {
+        r2Sum += analysis.metrics.r2;
+        r2Count += 1;
+      }
+      analysis.segments.forEach((segment) => {
+        degreeSum += segment.degree;
+        segmentCount += 1;
+      });
+    }
+
+    return {
+      coverage: coveredPoints / (rowCount * frequencyCount),
+      normalizedRmse: errorCount ? normalizedError / errorCount : Infinity,
+      meanDegree: segmentCount ? degreeSum / segmentCount : Infinity,
+      meanR2: r2Count ? r2Sum / r2Count : NaN,
+      segmentCount,
+    };
+  }
+
+  function complexSeriesScale(real, imag) {
+    const meanReal = real.reduce((sum, value) => sum + value, 0) / real.length;
+    const meanImag = imag.reduce((sum, value) => sum + value, 0) / imag.length;
+    let sum = 0;
+    for (let index = 0; index < real.length; index += 1) {
+      sum += (real[index] - meanReal) ** 2 + (imag[index] - meanImag) ** 2;
+    }
+    return Math.max(Math.sqrt(sum / real.length), Number.EPSILON);
+  }
+
   function analyzeImpedanceSpectrogram(time, realMatrix, imagMatrix, settings) {
     const rowCount = time.length;
     const frequencyCount = realMatrix[0].length;
@@ -730,7 +844,7 @@
       { length: config.spectraCount },
       (_, index) => (config.durationHours * 3600 * index) / Math.max(1, config.spectraCount - 1),
     );
-    const normalRandom = createNormalRandom(config.seed);
+    const normalRandom = createNormalRandom();
     const noiseFraction = config.noisePercent / 100;
     const parameterSeries = Object.fromEntries(model.parameters.map((parameter) => [parameter.key, []]));
     const real = [];
@@ -854,21 +968,16 @@
     return Array.from({ length: count }, (_, index) => min * ratio ** (index / Math.max(1, count - 1)));
   }
 
-  function createNormalRandom(seed) {
-    let randomState = Number(seed) >>> 0;
+  function createNormalRandom() {
     let spare = null;
-    const uniform = () => {
-      randomState = (Math.imul(1664525, randomState) + 1013904223) >>> 0;
-      return randomState / 4294967296;
-    };
     return () => {
       if (spare !== null) {
         const value = spare;
         spare = null;
         return value;
       }
-      const radius = Math.sqrt(-2 * Math.log(Math.max(uniform(), Number.EPSILON)));
-      const angle = 2 * Math.PI * uniform();
+      const radius = Math.sqrt(-2 * Math.log(Math.max(Math.random(), Number.EPSILON)));
+      const angle = 2 * Math.PI * Math.random();
       spare = radius * Math.sin(angle);
       return radius * Math.cos(angle);
     };
@@ -1469,9 +1578,7 @@
       : `${displayAxis.symbol}: ${formatNumber(displayAxis.start, displayAxis.decimals)}–${formatNumber(displayAxis.end, displayAxis.decimals)} ${displayAxis.unit}`;
     const sampleLabel = displayAxis.kind === "time" ? "chwil" : "punktów";
     els.datasetSummary.textContent = `${data.name} · ${data.real.length} ${sampleLabel} · ${data.frequenciesHz.length} częstotliwości · ${axisSummary}`;
-    els.dataBadge.textContent = state.source === "example"
-      ? "Przykład"
-      : state.source === "simulation" ? "Symulacja" : "Lokalne";
+    els.dataBadge.textContent = state.source === "simulation" ? "Symulacja" : "Przykład";
     els.frequency.max = String(data.frequenciesHz.length - 1);
     els.frequency.value = String(Math.min(Number(els.frequency.value), data.frequenciesHz.length - 1));
     updateAxisInterface(analysisAxis, displayAxis);
@@ -1508,6 +1615,7 @@
     if (Number.isFinite(targetFrequency)) {
       els.frequency.value = String(nearestFrequencyIndex(dataset.frequenciesHz, targetFrequency));
     }
+    resetAutoTuneSummary();
     updateDatasetInterface();
     runAnalysis({ addHistory: false });
   }
@@ -1536,6 +1644,43 @@
     els.thresholdControl.classList.toggle("is-hidden", criterion !== "r2");
   }
 
+  function runAutoTune() {
+    if (!state.dataset) return;
+    els.autoTune.disabled = true;
+    els.run.disabled = true;
+    els.status.textContent = "AUTO · porównywanie ustawień dla całego spektrogramu…";
+
+    requestAnimationFrame(() => {
+      try {
+        const tuned = autoTuneDataset(state.dataset, currentSettings());
+        $$('input[name="strategy"]').forEach((input) => { input.checked = input.value === "overlap"; });
+        $$('input[name="criterion"]').forEach((input) => { input.checked = input.value === "r2"; });
+        els.windowSize.value = String(tuned.settings.windowSize);
+        els.stepSize.value = String(tuned.settings.stepSize);
+        els.degreeMin.value = String(tuned.settings.degreeMin);
+        els.degreeMax.value = String(tuned.settings.degreeMax);
+        updateConditionalControls();
+
+        const overlapPercent = Math.round(100 * tuned.overlap);
+        const coveragePercent = formatNumber(100 * tuned.coverage, 1);
+        const meanDegree = Number.isFinite(tuned.meanDegree) ? formatNumber(tuned.meanDegree, 2) : "—";
+        els.autoTuneSummary.textContent = `AUTO: okno ${tuned.settings.windowSize}, krok ${tuned.settings.stepSize} (${overlapPercent}% nakładania), stopnie 1–5 (średnio ${meanDegree}) · pokrycie ${coveragePercent}%.`;
+        runAnalysis();
+        showToast(`AUTO sprawdziło ${tuned.candidatesEvaluated} wariantów dla ${tuned.frequenciesEvaluated} częstotliwości.`);
+      } catch (error) {
+        els.status.textContent = "Nie udało się dobrać parametrów AUTO";
+        showToast(error.message || "Błąd automatycznego doboru parametrów.", true);
+      } finally {
+        els.autoTune.disabled = false;
+        els.run.disabled = false;
+      }
+    });
+  }
+
+  function resetAutoTuneSummary() {
+    els.autoTuneSummary.textContent = "Dobiera okno, nakładanie i stopnie 1–5 dla całego spektrogramu.";
+  }
+
   function readSimulationSettings() {
     const model = circuitModelDefinition(els.simulatorModel.value);
     const durationHours = readSimulationNumber(els.simDuration, "Czas eksperymentu", 0.1, 10000);
@@ -1544,7 +1689,6 @@
     const frequencyMax = readSimulationNumber(els.simFrequencyMax, "Maksymalna częstotliwość", 0.000001, 10000000);
     const frequencyCount = Math.round(readSimulationNumber(els.simFrequencyCount, "Liczba częstotliwości", 8, 100));
     const noisePercent = readSimulationNumber(els.simNoise, "Poziom szumu", 0, 20);
-    const seed = Math.round(readSimulationNumber(els.simSeed, "Ziarno losowe", 0, 4294967295));
     if (frequencyMax <= frequencyMin) {
       throw new Error("Częstotliwość maksymalna musi być większa od minimalnej.");
     }
@@ -1577,7 +1721,6 @@
       frequencyMax,
       frequencyCount,
       noisePercent,
-      seed,
       parameters,
     };
   }
@@ -1662,59 +1805,6 @@
     };
   }
 
-  async function importDataset(fileList) {
-    const files = Array.from(fileList);
-    if (!files.length) return;
-    const findFile = (pattern) => files.find((file) => pattern.test(file.name.toLowerCase()));
-    const fileMap = {
-      real: findFile(/(^|[^a-z])re([^a-z]|$)/),
-      imag: findFile(/(^|[^a-z])im([^a-z]|$)/),
-      tpi: findFile(/tpi/),
-      frequencies: findFile(/powloki2|powłoki2|powloki|frequency|freq/),
-    };
-    if (Object.values(fileMap).some((file) => !file)) {
-      throw new Error("Wybierz jednocześnie pliki re, im, tpi oraz powloki2.");
-    }
-
-    const [realText, imagText, tpiText, frequencyText] = await Promise.all([
-      fileMap.real.text(),
-      fileMap.imag.text(),
-      fileMap.tpi.text(),
-      fileMap.frequencies.text(),
-    ]);
-    const real = parseMatrix(realText);
-    const imag = parseMatrix(imagText);
-    const tpi = parseMatrix(tpiText);
-    const frequencyMatrix = parseMatrix(frequencyText);
-    const dataset = normalizeDataset({
-      name: "Zestaw użytkownika",
-      source: files.map((file) => file.name).join(", "),
-      timeSeconds: tpi.map((row) => row[0]),
-      potential: tpi.map((row) => row[1]),
-      current: tpi.map((row) => row[2]),
-      frequenciesHz: frequencyMatrix.slice(1).map((row) => row[0]),
-      real,
-      imag,
-    });
-    state.datasets.experimental = dataset;
-    activateDataset("experimental");
-    showToast("Wczytano zestaw danych lokalnych.");
-  }
-
-  function parseMatrix(text) {
-    const rows = text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => line.split(/[\s;,]+/).filter(Boolean).map(Number));
-    if (!rows.length || rows.some((row) => row.some((value) => !Number.isFinite(value)))) {
-      throw new Error("Nie można odczytać wartości liczbowych z jednego z plików.");
-    }
-    const width = rows[0].length;
-    if (rows.some((row) => row.length !== width)) throw new Error("Plik zawiera wiersze o różnej liczbie kolumn.");
-    return rows;
-  }
-
   function exportCsv() {
     if (!state.result) return;
     const frequency = state.dataset.frequenciesHz[state.result.settings.frequencyIndex];
@@ -1778,6 +1868,7 @@
     els.degreeMax.value = String(DEFAULTS.degreeMax);
     els.fixedDegree.value = String(DEFAULTS.fixedDegree);
     els.threshold.value = String(DEFAULTS.threshold);
+    els.simNoise.value = String(DEFAULTS.simulationNoise);
     state.view = {
       projection: DEFAULTS.projection,
       azimuth: DEFAULTS.azimuth,
@@ -1935,18 +2026,13 @@
       state.datasets.example = dataset;
       activateDataset("example", EXAMPLE_DEFAULT_FREQUENCIES[exampleKey]);
     });
-    els.files.addEventListener("change", async (event) => {
-      try {
-        await importDataset(event.target.files);
-      } catch (error) {
-        showToast(error.message || "Nie udało się wczytać danych.", true);
-      } finally {
-        event.target.value = "";
-      }
-    });
     els.exportButton.addEventListener("click", exportCsv);
     els.resetButton.addEventListener("click", resetApplication);
-    els.run.addEventListener("click", () => runAnalysis());
+    els.autoTune.addEventListener("click", runAutoTune);
+    els.run.addEventListener("click", () => {
+      resetAutoTuneSummary();
+      runAnalysis();
+    });
     els.clearHistory.addEventListener("click", () => {
       state.history = [];
       renderHistory();
@@ -1965,7 +2051,10 @@
       renderFitChart();
       renderResidualChart();
     });
-    els.threshold.addEventListener("input", updateFrequencyLabels);
+    els.threshold.addEventListener("input", () => {
+      resetAutoTuneSummary();
+      updateFrequencyLabels();
+    });
     els.showIso.addEventListener("change", renderSpectrogram);
     els.showFit.addEventListener("change", renderSpectrogram);
     els.projection.addEventListener("change", updateViewFromControls);
@@ -1989,6 +2078,7 @@
 
     $$("input[name='strategy'], input[name='criterion']").forEach((input) => {
       input.addEventListener("change", () => {
+        resetAutoTuneSummary();
         updateConditionalControls();
         runAnalysis();
       });

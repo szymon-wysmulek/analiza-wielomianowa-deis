@@ -142,6 +142,13 @@
 
   function normalizeDataset(raw) {
     if (!raw) throw new Error("Brak danych wejściowych.");
+    const analysisAxis = raw.analysisAxis === "potential" ? "potential" : "time";
+    const displayAxis = raw.displayAxis === "potential" ? "potential" : analysisAxis;
+    const potential = raw.potential ? raw.potential.map(Number) : [];
+    const potentialAxisMode = raw.potentialAxisMode === "linear-scan" ? "linear-scan" : "measured";
+    const potentialAxis = potentialAxisMode === "linear-scan"
+      ? linearizedPotentialAxis(potential)
+      : potential.slice();
     const dataset = {
       name: raw.name || "Zestaw użytkownika",
       source: raw.source || "Pliki lokalne",
@@ -149,9 +156,12 @@
       frequenciesHz: raw.frequenciesHz.map(Number),
       real: raw.real.map((row) => row.map(Number)),
       imag: raw.imag.map((row) => row.map(Number)),
-      potential: raw.potential ? raw.potential.map(Number) : [],
+      potential,
+      potentialAxis,
+      potentialAxisMode,
       current: raw.current ? raw.current.map(Number) : [],
-      analysisAxis: raw.analysisAxis === "potential" ? "potential" : "time",
+      analysisAxis,
+      displayAxis,
       simulation: raw.simulation || null,
     };
 
@@ -161,7 +171,7 @@
     if (dataset.imag.length !== rows || dataset.timeSeconds.length !== rows) {
       throw new Error("Niezgodna liczba chwil w plikach re, im i tpi.");
     }
-    if (dataset.analysisAxis === "potential" && dataset.potential.length !== rows) {
+    if ((dataset.analysisAxis === "potential" || dataset.displayAxis === "potential") && dataset.potentialAxis.length !== rows) {
       throw new Error("Niezgodna liczba wartości potencjału w pliku tpi.");
     }
     if (
@@ -173,15 +183,36 @@
     return dataset;
   }
 
-  function datasetAxis(dataset) {
-    if (dataset.analysisAxis === "potential") {
-      const values = dataset.potential;
+  function linearizedPotentialAxis(values) {
+    const count = values.length;
+    if (count < 2) return values.slice();
+    const meanIndex = (count - 1) / 2;
+    const meanValue = values.reduce((sum, value) => sum + value, 0) / count;
+    let covariance = 0;
+    let variance = 0;
+    for (let index = 0; index < count; index += 1) {
+      const centeredIndex = index - meanIndex;
+      covariance += centeredIndex * (values[index] - meanValue);
+      variance += centeredIndex ** 2;
+    }
+    const slope = covariance / variance;
+    if (!Number.isFinite(slope) || Math.abs(slope) <= Number.EPSILON) return values.slice();
+    const intercept = meanValue - slope * meanIndex;
+    return values.map((_, index) => intercept + slope * index);
+  }
+
+  function datasetAxis(dataset, role = "analysis") {
+    const axisKind = role === "display" ? dataset.displayAxis : dataset.analysisAxis;
+    if (axisKind === "potential") {
+      const values = dataset.potentialAxis;
+      const linearScan = dataset.potentialAxisMode === "linear-scan";
       return {
         kind: "potential",
         values,
         symbol: "E",
         unit: "V",
-        name: "potencjału",
+        label: linearScan ? "potencjał skanu" : "potencjał",
+        name: linearScan ? "potencjału skanu" : "potencjału",
         csvHeader: "potential_v",
         decimals: 3,
         start: Math.min(...values),
@@ -194,6 +225,7 @@
       values,
       symbol: "t",
       unit: "h",
+      label: "czas",
       name: "czasu",
       csvHeader: "time_h",
       decimals: 1,
@@ -243,8 +275,9 @@
   function runAnalysis({ addHistory = true } = {}) {
     if (!state.dataset) return;
     const settings = currentSettings();
-    const axis = datasetAxis(state.dataset);
-    const xValues = axis.values;
+    const analysisAxis = datasetAxis(state.dataset, "analysis");
+    const displayAxis = datasetAxis(state.dataset, "display");
+    const xValues = analysisAxis.values;
     const real = state.dataset.real.map((row) => row[settings.frequencyIndex]);
     const imag = state.dataset.imag.map((row) => row[settings.frequencyIndex]);
 
@@ -256,7 +289,9 @@
       state.result = analyzeComplexSeries(xValues, real, imag, settings);
       state.result.settings = settings;
       state.result.xValues = xValues;
-      state.result.axis = axis;
+      state.result.analysisAxis = analysisAxis;
+      state.result.displayAxis = displayAxis;
+      state.result.displayValues = displayAxis.values;
       state.result.real = real;
       state.result.imag = imag;
       const derivedKey = derivedSettingsKey(settings);
@@ -858,7 +893,7 @@
 
     const data = state.dataset;
     const settings = currentSettings();
-    const axis = datasetAxis(data);
+    const axis = datasetAxis(data, "display");
     const bounds = impedanceBounds(data);
     const projector = createProjector(width, height, { x: 1.35, y: 1, z: 1.75 });
 
@@ -919,7 +954,7 @@
 
   function renderDerivedSpectrograms() {
     if (!state.derived) return;
-    const axis = datasetAxis(state.dataset);
+    const axis = datasetAxis(state.dataset, "display");
     renderDerivedSpectrogram(
       els.differentialCanvas,
       state.derived.differentialReal,
@@ -952,7 +987,7 @@
 
     const settings = currentSettings();
     const rowCount = realMatrix.length;
-    const axis = datasetAxis(state.dataset);
+    const axis = datasetAxis(state.dataset, "display");
     const projector = createProjector(width, height, { x: 1.35, y: 1, z: 1.75 });
     const project = (real, imag, rowIndex) => {
       if (real === null || imag === null || !Number.isFinite(real) || !Number.isFinite(imag)) return null;
@@ -1108,9 +1143,9 @@
 
     const result = state.result;
     const bounds = series3dBounds(result.real, result.imag, result.fitReal, result.fitImag);
-    const xValues = result.xValues;
-    const xMin = result.axis.start;
-    const xMax = result.axis.end;
+    const xValues = result.displayValues;
+    const xMin = result.displayAxis.start;
+    const xMax = result.displayAxis.end;
     const projector = createProjector(width, height, { x: 1.65, y: 1.05, z: 1.05 });
     const project = (x, real, imag) => projector({
       x: normalize(x, xMin, xMax),
@@ -1118,7 +1153,7 @@
       z: normalize(imag, bounds.minImag, bounds.maxImag),
     });
 
-    draw3dAxes(ctx, projector, { x: result.axis.symbol, y: "Z′", z: "−Z″" }, "x", result.axis);
+    draw3dAxes(ctx, projector, { x: result.displayAxis.symbol, y: "Z′", z: "−Z″" }, "x", result.displayAxis);
     const dataStep = Math.max(1, Math.floor(xValues.length / 450));
     const dataPoints = [];
     const fitPoints = [];
@@ -1185,9 +1220,9 @@
     const observed = componentValues(state.result.real, state.result.imag, component);
     const fitted = componentValues(state.result.fitReal, state.result.fitImag, component);
     const residuals = observed.map((value, index) => fitted[index] === null ? null : value - fitted[index]);
-    drawLineChart(els.residualCanvas, state.result.xValues, [
+    drawLineChart(els.residualCanvas, state.result.displayValues, [
       { values: residuals, color: COLORS.blue, width: 1, points: false, alpha: 0.85 },
-    ], { component, zeroLine: true, residual: true, axis: state.result.axis });
+    ], { component, zeroLine: true, residual: true, axis: state.result.displayAxis });
   }
 
   function drawLineChart(canvas, x, series, options) {
@@ -1427,18 +1462,19 @@
 
   function updateDatasetInterface() {
     const data = state.dataset;
-    const axis = datasetAxis(data);
-    const axisSummary = axis.kind === "time"
-      ? `${formatNumber(axis.end - axis.start, 1)} h`
-      : `${axis.symbol}: ${formatNumber(axis.start, axis.decimals)}–${formatNumber(axis.end, axis.decimals)} ${axis.unit}`;
-    const sampleLabel = axis.kind === "time" ? "chwil" : "punktów";
+    const analysisAxis = datasetAxis(data, "analysis");
+    const displayAxis = datasetAxis(data, "display");
+    const axisSummary = displayAxis.kind === "time"
+      ? `${formatNumber(displayAxis.end - displayAxis.start, 1)} h`
+      : `${displayAxis.symbol}: ${formatNumber(displayAxis.start, displayAxis.decimals)}–${formatNumber(displayAxis.end, displayAxis.decimals)} ${displayAxis.unit}`;
+    const sampleLabel = displayAxis.kind === "time" ? "chwil" : "punktów";
     els.datasetSummary.textContent = `${data.name} · ${data.real.length} ${sampleLabel} · ${data.frequenciesHz.length} częstotliwości · ${axisSummary}`;
     els.dataBadge.textContent = state.source === "example"
       ? "Przykład"
       : state.source === "simulation" ? "Symulacja" : "Lokalne";
     els.frequency.max = String(data.frequenciesHz.length - 1);
     els.frequency.value = String(Math.min(Number(els.frequency.value), data.frequenciesHz.length - 1));
-    updateAxisInterface(axis);
+    updateAxisInterface(analysisAxis, displayAxis);
     updateDataSourceControls();
     updateFrequencyLabels();
   }
@@ -1451,14 +1487,16 @@
     els.exampleDataset.disabled = state.source !== "example";
   }
 
-  function updateAxisInterface(axis) {
-    const potential = axis.kind === "potential";
-    els.derivedAxisDescription.textContent = `pochodne względem ${axis.name}`;
-    els.differentialFormula.innerHTML = `Z<sub>DIFF</sub> = ∂Z/∂${axis.symbol}`;
-    els.relativeFormula.innerHTML = `Z<sub>REL</sub> = (∂Z/∂${axis.symbol}) / Z`;
+  function updateAxisInterface(analysisAxis, displayAxis) {
+    const potential = analysisAxis.kind === "potential";
+    els.derivedAxisDescription.textContent = analysisAxis.kind === displayAxis.kind
+      ? `pochodne względem ${analysisAxis.name}`
+      : `pochodne względem ${analysisAxis.name} · oś: ${displayAxis.label}`;
+    els.differentialFormula.innerHTML = `Z<sub>DIFF</sub> = ∂Z/∂${analysisAxis.symbol}`;
+    els.relativeFormula.innerHTML = `Z<sub>REL</sub> = (∂Z/∂${analysisAxis.symbol}) / Z`;
     els.differentialUnit.textContent = potential ? "Ω·cm²·V⁻¹" : "Ω·cm²·h⁻¹";
     els.relativeUnit.textContent = potential ? "V⁻¹" : "h⁻¹";
-    els.residualCanvas.setAttribute("aria-label", `Reszty aproksymacji względem ${axis.name}`);
+    els.residualCanvas.setAttribute("aria-label", `Reszty aproksymacji względem ${displayAxis.name}`);
   }
 
   function activateDataset(source, targetFrequency = null) {
@@ -1680,9 +1718,14 @@
   function exportCsv() {
     if (!state.result) return;
     const frequency = state.dataset.frequenciesHz[state.result.settings.frequencyIndex];
-    const axis = state.result.axis;
+    const analysisAxis = state.result.analysisAxis;
+    const displayAxis = state.result.displayAxis;
+    const axisColumns = [{ header: analysisAxis.csvHeader, values: state.result.xValues }];
+    if (displayAxis.kind !== analysisAxis.kind) {
+      axisColumns.push({ header: displayAxis.csvHeader, values: state.result.displayValues });
+    }
     const lines = [
-      `${axis.csvHeader},frequency_hz,re_z,im_z,re_fit,im_fit,absolute_residual,mean_degree`,
+      [...axisColumns.map((column) => column.header), "frequency_hz", "re_z", "im_z", "re_fit", "im_fit", "absolute_residual", "mean_degree"].join(","),
     ];
     for (let index = 0; index < state.result.xValues.length; index += 1) {
       const fitReal = state.result.fitReal[index];
@@ -1692,7 +1735,7 @@
         state.result.imag[index] - fitImag,
       );
       lines.push([
-        state.result.xValues[index],
+        ...axisColumns.map((column) => column.values[index]),
         frequency,
         state.result.real[index],
         state.result.imag[index],
